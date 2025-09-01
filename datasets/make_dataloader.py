@@ -10,10 +10,12 @@ from .msmt17 import MSMT17
 from .sampler_ddp import RandomIdentitySampler_DDP
 import torch.distributed as dist
 from .mm import MM
+from .market_nightreid import Market_NightReID
 __factory = {
     'market1501': Market1501,
     'msmt17': MSMT17,
     'mm': MM,
+    'market_nightreid': Market_NightReID,
 }
 
 def train_collate_fn(batch):
@@ -51,61 +53,110 @@ def make_dataloader(cfg):
 
     num_workers = cfg.DATALOADER.NUM_WORKERS
 
-    if cfg.DATASETS.NAMES == 'ourapi':
-        dataset = OURAPI(root_train=cfg.DATASETS.ROOT_TRAIN_DIR, root_val=cfg.DATASETS.ROOT_VAL_DIR, config=cfg)
-    else:
-        dataset = __factory[cfg.DATASETS.NAMES](root=cfg.DATASETS.ROOT_DIR)
+    # if cfg.DATASETS.NAMES == 'ourapi':
+    #     dataset = OURAPI(root_train=cfg.DATASETS.ROOT_TRAIN_DIR, root_val=cfg.DATASETS.ROOT_VAL_DIR, config=cfg)
+    # else:
+    #     dataset = __factory[cfg.DATASETS.NAMES](root=cfg.DATASETS.ROOT_DIR)
 
-    train_set = ImageDataset(dataset.train, train_transforms)
-    train_set_normal = ImageDataset(dataset.train, val_transforms)
-    num_classes = dataset.num_train_pids
-    cam_num = dataset.num_train_cams
-    view_num = dataset.num_train_vids
+    source_dataset = __factory[cfg.DATASETS.SOURCE_NAMES](root=cfg.DATASETS.ROOT_DIR)
+    target_dataset = __factory[cfg.DATASETS.TARGET_NAMES](root=cfg.DATASETS.ROOT_DIR)
+
+    source_train_set = ImageDataset(source_dataset.train, train_transforms)
+    target_train_set = ImageDataset(target_dataset.train, train_transforms)
+
+    # train_set = ImageDataset(dataset.train, train_transforms)
+    # train_set_normal = ImageDataset(dataset.train, val_transforms)
+    # num_classes = dataset.num_train_pids
+    # cam_num = dataset.num_train_cams
+    # view_num = dataset.num_train_vids
+
+    num_classes = source_dataset.num_train_pids
+    cam_num = source_dataset.num_train_cams
+    view_num = source_dataset.num_train_vids
 
     if cfg.DATALOADER.SAMPLER in ['softmax_triplet', 'img_triplet']:
-        print('using img_triplet sampler')
-        if cfg.MODEL.DIST_TRAIN:
-            print('DIST_TRAIN START')
-            mini_batch_size = cfg.SOLVER.IMS_PER_BATCH // dist.get_world_size()
-            data_sampler = RandomIdentitySampler_DDP(dataset.train, cfg.SOLVER.IMS_PER_BATCH, cfg.DATALOADER.NUM_INSTANCE)
-            batch_sampler = torch.utils.data.sampler.BatchSampler(data_sampler, mini_batch_size, True)
-            train_loader = torch.utils.data.DataLoader(
-                train_set,
-                num_workers=num_workers,
-                batch_sampler=batch_sampler,
-                collate_fn=train_collate_fn,
-                pin_memory=True,
-            )
-        else:
-            train_loader = DataLoader(
-                train_set, batch_size=cfg.SOLVER.IMS_PER_BATCH,
-                sampler=RandomIdentitySampler(dataset.train, cfg.SOLVER.IMS_PER_BATCH, cfg.DATALOADER.NUM_INSTANCE),
-                num_workers=num_workers, collate_fn=train_collate_fn
-            )
+        print('using img_triplet sampler for SOURCE')
+        source_loader = DataLoader(
+            source_train_set, batch_size=cfg.SOLVER.IMS_PER_BATCH // 2,
+            sampler=RandomIdentitySampler(source_dataset.train, cfg.SOLVER.IMS_PER_BATCH // 2, cfg.DATALOADER.NUM_INSTANCE),
+            num_workers=num_workers, collate_fn=train_collate_fn
+        )
+
     elif cfg.DATALOADER.SAMPLER == 'softmax':
         print('using softmax sampler')
         train_loader = DataLoader(
-            train_set, batch_size=cfg.SOLVER.IMS_PER_BATCH, shuffle=True, num_workers=num_workers,
+            source_train_set, batch_size=cfg.SOLVER.IMS_PER_BATCH, shuffle=True, num_workers=num_workers,
             collate_fn=train_collate_fn
         )
     elif cfg.DATALOADER.SAMPLER in ['id_triplet', 'id']:
         print('using ID sampler')
         train_loader = DataLoader(
-                train_set, batch_size=cfg.SOLVER.IMS_PER_BATCH,
-                sampler=RandomIdentitySampler_IdUniform(dataset.train, cfg.DATALOADER.NUM_INSTANCE),
+                source_train_set, batch_size=cfg.SOLVER.IMS_PER_BATCH,
+                sampler=RandomIdentitySampler_IdUniform(source_dataset.train, cfg.DATALOADER.NUM_INSTANCE),
                 num_workers=num_workers, collate_fn=train_collate_fn, drop_last = True,
         )
     else:
         print('unsupported sampler! expected softmax or triplet but got {}'.format(cfg.SAMPLER))
 
-    val_set = ImageDataset(dataset.query + dataset.gallery, val_transforms)
+    print('using img_triplet sampler for TARGET')
+    target_loader = DataLoader(
+        target_train_set, batch_size=cfg.SOLVER.IMS_PER_BATCH // 2,
+        shuffle=True, num_workers=num_workers,
+        collate_fn=train_collate_fn, drop_last=True
+    )
 
+    val_set = ImageDataset(target_dataset.query + target_dataset.gallery, val_transforms)
     val_loader = DataLoader(
         val_set, batch_size=cfg.TEST.IMS_PER_BATCH, shuffle=False, num_workers=num_workers,
         collate_fn=val_collate_fn
     )
-    train_loader_normal = DataLoader(
-        train_set_normal, batch_size=cfg.TEST.IMS_PER_BATCH, shuffle=False, num_workers=num_workers,
-        collate_fn=val_collate_fn
-    )
-    return train_loader, train_loader_normal, val_loader, len(dataset.query), num_classes, cam_num, view_num
+
+    return source_loader, target_loader, val_loader, len(target_dataset.query), num_classes, cam_num, view_num
+
+    # if cfg.DATALOADER.SAMPLER in ['softmax_triplet', 'img_triplet']:
+    #     print('using img_triplet sampler')
+    #     if cfg.MODEL.DIST_TRAIN:
+    #         print('DIST_TRAIN START')
+    #         mini_batch_size = cfg.SOLVER.IMS_PER_BATCH // dist.get_world_size()
+    #         data_sampler = RandomIdentitySampler_DDP(dataset.train, cfg.SOLVER.IMS_PER_BATCH, cfg.DATALOADER.NUM_INSTANCE)
+    #         batch_sampler = torch.utils.data.sampler.BatchSampler(data_sampler, mini_batch_size, True)
+    #         train_loader = torch.utils.data.DataLoader(
+    #             train_set,
+    #             num_workers=num_workers,
+    #             batch_sampler=batch_sampler,
+    #             collate_fn=train_collate_fn,
+    #             pin_memory=True,
+    #         )
+    #     else:
+    #         train_loader = DataLoader(
+    #             train_set, batch_size=cfg.SOLVER.IMS_PER_BATCH,
+    #             sampler=RandomIdentitySampler(dataset.train, cfg.SOLVER.IMS_PER_BATCH, cfg.DATALOADER.NUM_INSTANCE),
+    #             num_workers=num_workers, collate_fn=train_collate_fn
+    #         )
+    # elif cfg.DATALOADER.SAMPLER == 'softmax':
+    #     print('using softmax sampler')
+    #     train_loader = DataLoader(
+    #         train_set, batch_size=cfg.SOLVER.IMS_PER_BATCH, shuffle=True, num_workers=num_workers,
+    #         collate_fn=train_collate_fn
+    #     )
+    # elif cfg.DATALOADER.SAMPLER in ['id_triplet', 'id']:
+    #     print('using ID sampler')
+    #     train_loader = DataLoader(
+    #             train_set, batch_size=cfg.SOLVER.IMS_PER_BATCH,
+    #             sampler=RandomIdentitySampler_IdUniform(dataset.train, cfg.DATALOADER.NUM_INSTANCE),
+    #             num_workers=num_workers, collate_fn=train_collate_fn, drop_last = True,
+    #     )
+    # else:
+    #     print('unsupported sampler! expected softmax or triplet but got {}'.format(cfg.SAMPLER))
+
+    # val_set = ImageDataset(dataset.query + dataset.gallery, val_transforms)
+
+    # val_loader = DataLoader(
+    #     val_set, batch_size=cfg.TEST.IMS_PER_BATCH, shuffle=False, num_workers=num_workers,
+    #     collate_fn=val_collate_fn
+    # )
+    # train_loader_normal = DataLoader(
+    #     train_set_normal, batch_size=cfg.TEST.IMS_PER_BATCH, shuffle=False, num_workers=num_workers,
+    #     collate_fn=val_collate_fn
+    # )
+    # return train_loader, train_loader_normal, val_loader, len(dataset.query), num_classes, cam_num, view_num

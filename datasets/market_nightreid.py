@@ -13,12 +13,13 @@ from .bases import BaseImageDataset
 from collections import defaultdict
 import pickle
 
-class Market1501(BaseImageDataset):
+class Market_NightReID(BaseImageDataset):
     
     dataset_dir = 'market1501'
+    dataset_n_dir = 'NightReID'
 
     def __init__(self, root='', verbose=True, pid_begin = 0, **kwargs):
-        super(Market1501, self).__init__()
+        super(Market_NightReID, self).__init__()
         self.dataset_dir = osp.join(root, self.dataset_dir)
         self.train_dir = osp.join(self.dataset_dir, 'bounding_box_train')
         self.query_dir = osp.join(self.dataset_dir, 'query')
@@ -41,6 +42,29 @@ class Market1501(BaseImageDataset):
         self.num_train_pids, self.num_train_imgs, self.num_train_cams, self.num_train_vids = self.get_imagedata_info(self.train)
         self.num_query_pids, self.num_query_imgs, self.num_query_cams, self.num_query_vids = self.get_imagedata_info(self.query)
         self.num_gallery_pids, self.num_gallery_imgs, self.num_gallery_cams, self.num_gallery_vids = self.get_imagedata_info(self.gallery)
+
+
+        self.train_n_dir = osp.join(self.dataset_n_dir, 'bounding_box_train')
+        self.query_n_dir = osp.join(self.dataset_n_dir, 'query')
+        self.gallery_n_dir = osp.join(self.dataset_n_dir, 'bounding_box_test')
+
+        self._check_before_run()
+        self.pid_begin = pid_begin + self.num_train_pids
+        train_n = self._process_n_dir(self.train_n_dir, relabel=True)
+        query_n = self._process_n_dir(self.query_n_dir, relabel=False)
+        gallery_n = self._process_n_dir(self.gallery_n_dir, relabel=False)
+
+        if verbose:
+            print("=> NightReID loaded")
+            self.print_dataset_statistics(train_n, query_n, gallery_n)
+
+        self.train_n = train_n
+        self.query_n = query_n
+        self.gallery_n = gallery_n
+
+        self.num_train_n_pids, self.num_train_n_imgs, self.num_train_n_cams, self.num_train_n_vids = self.get_imagedata_info(self.train_n)
+        self.num_query_n_pids, self.num_query_n_imgs, self.num_query_n_cams, self.num_query_n_vids = self.get_imagedata_info(self.query_n)
+        self.num_gallery_n_pids, self.num_gallery_n_imgs, self.num_gallery_n_cams, self.num_gallery_n_vids = self.get_imagedata_info(self.gallery_n)
 
     def _check_before_run(self):
         """Check if all files are available before going deeper"""
@@ -73,4 +97,29 @@ class Market1501(BaseImageDataset):
             if relabel: pid = pid2label[pid]
 
             dataset.append((img_path, self.pid_begin + pid, camid, 1))
+        return dataset
+
+    def _process_n_dir(self, dir_path, relabel=False):
+        img_paths = glob.glob(osp.join(dir_path, '*.jpg'))
+        pattern = re.compile(r'(\d{4})([LR][123])C')
+        camdic = {
+            'L1': 0, 'L2': 1, 'L3': 2,
+            'R1': 3, 'R2': 4, 'R3': 5,
+        }
+
+        pid_container = set()
+        for img_path in sorted(img_paths):
+            pid, _ = pattern.search(img_path).groups()
+            pid_container.add(int(pid))
+        pid2label = {pid: label for label, pid in enumerate(pid_container)}
+        dataset = []
+        for img_path in sorted(img_paths):
+            pid, camid = pattern.search(img_path).groups()
+            pid=int(pid)
+            camid = camdic[camid]
+            assert 1 <= pid <= 7474
+            assert 0 <= camid <= 5
+            if relabel: pid = pid2label[pid]
+
+            dataset.append((img_path, pid, camid, 1))
         return dataset

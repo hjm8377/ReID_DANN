@@ -12,7 +12,9 @@ import numpy as np
 def do_train(cfg,
              model,
              center_criterion,
-             train_loader,
+             # train_loader,
+             source_loader,
+             target_loader,
              val_loader,
              optimizer,
              optimizer_center,
@@ -45,7 +47,7 @@ def do_train(cfg,
         p = step/float(total_steps)
         return float(2.0 / (1.0 + np.exp(-gamma * p)) - 1.0)
     
-    total_steps = epochs * len(train_loader)
+    total_steps = epochs * max(len(source_loader), len(target_loader))
     global_step = 0
 
     # train
@@ -55,15 +57,33 @@ def do_train(cfg,
         acc_meter.reset()
         evaluator.reset()
         model.train()
-        for n_iter, (img, vid, target_cam, target_view) in enumerate(train_loader):
+
+        source_iter = iter(source_loader)
+        target_iter = iter(target_loader)
+
+        # for n_iter, (img, vid, target_cam, target_view) in enumerate(train_loader):
+        for n_iter in range(max(len(source_loader), len(target_loader))):
             optimizer.zero_grad()
             optimizer_center.zero_grad()
-            img = img.to(device)
-            target = vid.to(device)
-            target_cam = target_cam.to(device)
-            target_view = target_view.to(device)
 
-            
+            # img = img.to(device)
+            # target = vid.to(device)
+            # target_cam = target_cam.to(device)
+            # target_view = target_view.to(device)
+
+            try:
+                s_img, s_vid, s_target_cam, s_target_view, _ = next(source_iter)
+            except:
+                source_iter = iter(source_loader)
+                s_img, s_vid, s_target_cam, s_target_view, _ = next(source_iter)
+
+            try:
+                t_img, _, t_target_cam, t_target_view, _ = next(target_iter)
+            except:
+                target_iter = iter(target_loader)
+                t_img, _, t_target_cam, t_target_view, _ = next(target_iter)
+
+            s_img, s_vid, s_cam            
             
             
             lambda_d = dann_lambda()
