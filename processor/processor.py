@@ -109,13 +109,21 @@ def do_train(cfg,
                 dom_label_s = torch.zeros(dom_s.shape[0]).long().to(device)
                 dom_label_t = torch.ones(dom_t.shape[0]).long().to(device)
                 
-                loss_dom_s = F.cross_entropy(dom_s, dom_label_s)
-                loss_dom_t = F.cross_entropy(dom_t, dom_label_t)
+                # loss_dom_s = F.cross_entropy(dom_s, dom_label_s)
+                # loss_dom_t = F.cross_entropy(dom_t, dom_label_t)
 
-                Ns, Nt = dom_s.size(0), dom_t.size(0)
-                loss_dom = (loss_dom_s * Ns + loss_dom_t * Nt) / (Ns + Nt)
+                # Ns, Nt = dom_s.size(0), dom_t.size(0)
+                # loss_dom = (loss_dom_s * Ns + loss_dom_t * Nt) / (Ns + Nt)
 
-                loss = loss_id_tri + lambda_d * loss_dom
+                domain_logits = torch.cat([dom_s, dom_t], dim=0)
+                domain_labels = torch.cat([
+                    torch.zeros(dom_s.size(0)), 
+                    torch.ones(dom_t.size(0))
+                ], dim=0).long().to(device)
+
+                loss_dom = F.cross_entropy(domain_logits, domain_labels)
+
+                loss = loss_id_tri + 0.5 * loss_dom
 
                 # score, feat = model(img, target, cam_label=target_cam, view_label=target_view )
                 # loss = loss_fn(score, feat, target, target_cam)
@@ -143,7 +151,7 @@ def do_train(cfg,
             # 손실은 전체 배치 크기(소스+타겟) 기준으로 기록하는 것이 좋음
             total_batch_size = s_img.shape[0] + t_img.shape[0]
             loss_meter.update(loss.item(), total_batch_size)
-            acc_meter.update(acc, 1)
+            acc_meter.update(acc.item(), 1)
 
             global_step += 1
 
