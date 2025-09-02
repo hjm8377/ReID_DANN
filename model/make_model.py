@@ -212,7 +212,7 @@ class build_transformer(nn.Module):
         if pretrain_choice == 'self':
             self.load_param(model_path)
 
-    def forward(self, x, label=None, cam_label= None, view_label=None):
+    def forward(self, x, label=None, cam_label= None, view_label=None, skip_classifier=False):
         global_feat = self.base(x, cam_label=cam_label, view_label=view_label)
         if self.reduce_feat_dim:
             global_feat = self.fcneck(global_feat)
@@ -223,9 +223,13 @@ class build_transformer(nn.Module):
             # if self.ID_LOSS_TYPE in ('arcface', 'cosface', 'amsoftmax', 'circle'):
             #     cls_score = self.classifier(feat_cls, label)
             # else:
-            cls_score = self.classifier(feat_cls)
 
-            return cls_score, global_feat  # global feature for triplet loss
+            if skip_classifier:
+                return None, global_feat
+            else:
+                cls_score = self.classifier(feat_cls)
+
+                return cls_score, global_feat  # global feature for triplet loss
         else:
             if self.neck_feat == 'after':
                 # print("Test with feature after BN")
@@ -296,9 +300,9 @@ class BuildModel(nn.Module):
     def set_lambda_d(self, val: float):
         self.lambda_d = float(val)
 
-    def forward(self, x, label=None, cam_label= None, view_label=None):
+    def forward(self, x, label=None, cam_label= None, view_label=None, domain_only=False):
         if self.training:
-            cls_score, features = self.feature_extractor(x, label=label, cam_label=cam_label, view_label=view_label)
+            cls_score, features = self.feature_extractor(x, label=label, cam_label=cam_label, view_label=view_label, skip_classifier=domain_only)
             domain_logit = self.domain_discriminator(grl(features, self.lambda_d))
             return cls_score, features, domain_logit
         else:
