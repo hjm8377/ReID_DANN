@@ -100,14 +100,14 @@ def do_train(cfg,
                 score_s, feat_s, dom_s = out_s
 
                 out_t = model(t_img, cam_label=t_cam, view_label=t_view, domain_only=True)
-                _, feat_t, dom_t = out_t
+                _, _, dom_t = out_t
 
 
                 loss_id_tri = loss_fn(score_s,feat_s, s_vid, s_cam)
 
                 # domain loss
-                dom_label_s = torch.zeros(dom_s.shape[0]).long().to(device)
-                dom_label_t = torch.ones(dom_t.shape[0]).long().to(device)
+                # dom_label_s = torch.zeros(dom_s.shape[0]).long().to(device)
+                # dom_label_t = torch.ones(dom_t.shape[0]).long().to(device)
                 
                 # loss_dom_s = F.cross_entropy(dom_s, dom_label_s)
                 # loss_dom_t = F.cross_entropy(dom_t, dom_label_t)

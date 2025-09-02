@@ -11,11 +11,13 @@ from .sampler_ddp import RandomIdentitySampler_DDP
 import torch.distributed as dist
 from .mm import MM
 from .market_nightreid import Market_NightReID
+from .nightreid import NightReID
 __factory = {
     'market1501': Market1501,
     'msmt17': MSMT17,
     'mm': MM,
     'market_nightreid': Market_NightReID,
+    'nightreid': NightReID,
 }
 
 def train_collate_fn(batch):
