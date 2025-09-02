@@ -105,7 +105,7 @@ def make_dataloader(cfg):
         collate_fn=train_collate_fn, drop_last=True
     )
 
-    val_set = ImageDataset(target_dataset.query + target_dataset.gallery, val_transforms)
+    val_set = ImageDataset(source_dataset.query + source_dataset.gallery, val_transforms)
     val_loader = DataLoader(
         val_set, batch_size=cfg.TEST.IMS_PER_BATCH, shuffle=False, num_workers=num_workers,
         collate_fn=val_collate_fn
