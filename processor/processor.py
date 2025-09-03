@@ -81,13 +81,13 @@ def do_train(cfg,
                 s_img, s_vid, s_cam, s_view = next(source_iter)
 
             try:
-                t_img, t_vid_dummy, t_cam, t_view = next(target_iter)
+                t_img, t_vid, t_cam, t_view = next(target_iter)
             except:
                 target_iter = iter(target_loader)
-                t_img, t_vid_dummy, t_cam, t_view = next(target_iter)
+                t_img, t_vid, t_cam, t_view = next(target_iter)
 
             s_img, s_vid, s_cam, s_view = s_img.to(device), s_vid.to(device), s_cam.to(device), s_view.to(device)
-            t_img, t_cam, t_view = t_img.to(device), t_cam.to(device), t_view.to(device)
+            t_img, t_vid, t_cam, t_view = t_img.to(device), t_vid.to(device), t_cam.to(device), t_view.to(device)
             
             lambda_d = dann_lambda(global_step, total_steps)
             if hasattr(model, "set_lambda_d"):
@@ -95,15 +95,16 @@ def do_train(cfg,
             elif hasattr(model, "module") and hasattr(model.module, "set_lambda_d"):
                 model.module.set_lambda_d(lambda_d)
 
-            with amp.autocast(enabled=True):
+            with amp.autocast(device_type=device,enabled=True):
                 out_s = model(s_img, s_vid, cam_label=s_cam, view_label=s_view, domain_only=False)
                 score_s, feat_s, dom_s = out_s
 
-                out_t = model(t_img, cam_label=t_cam, view_label=t_view, domain_only=True)
-                _, _, dom_t = out_t
+                out_t = model(t_img, cam_label=t_cam, view_label=t_view, domain_only=False)
+                score_t, feat_t, dom_t = out_t
 
 
-                loss_id_tri = loss_fn(score_s,feat_s, s_vid, s_cam)
+                loss_id_tri_s = loss_fn(score_s,feat_s, s_vid, s_cam)
+                loss_id_tri_t = loss_fn(score_t,feat_t, t_vid, t_cam)
 
                 # domain loss
                 # dom_label_s = torch.zeros(dom_s.shape[0]).long().to(device)
@@ -123,7 +124,7 @@ def do_train(cfg,
 
                 loss_dom = F.cross_entropy(domain_logits, domain_labels)
 
-                loss = loss_id_tri + 0.5 * loss_dom
+                loss = loss_id_tri_s + loss_id_tri_t + 0.5 * lambda_d * loss_dom
 
                 # score, feat = model(img, target, cam_label=target_cam, view_label=target_view )
                 # loss = loss_fn(score, feat, target, target_cam)
@@ -146,7 +147,14 @@ def do_train(cfg,
             # loss_meter.update(loss.item(), img.shape[0])
             # acc_meter.update(acc, 1)
 
-            acc = (score_s.max(1)[1] == s_vid).float().mean()
+            acc_s = (score_s.max(1)[1] == s_vid).float().mean()
+            acc_t = (score_t.max(1)[1] == t_vid).float().mean()
+            acc = (acc_s + acc_t) / 2.0
+
+            # 도메인 분류 정확도
+            with torch.no_grad():
+                dom_pred = domain_logits.argmax(dim=1)
+                dom_acc = (dom_pred == domain_labels).float().mean()
 
             # 손실은 전체 배치 크기(소스+타겟) 기준으로 기록하는 것이 좋음
             total_batch_size = s_img.shape[0] + t_img.shape[0]
@@ -160,13 +168,35 @@ def do_train(cfg,
                 if dist.get_rank() == 0:
                     if (n_iter + 1) % log_period == 0:
                         base_lr = scheduler._get_lr(epoch)[0] if cfg.SOLVER.WARMUP_METHOD == 'cosine' else scheduler.get_lr()[0]
-                        logger.info("Epoch[{}] Iter[{}/{}] Loss: {:.3f}, Acc: {:.3f}, Base Lr: {:.2e}"
-                                    .format(epoch, (n_iter + 1), iters_per_epoch, loss_meter.avg, acc_meter.avg, base_lr))
+                        # logger.info("Epoch[{}] Iter[{}/{}] Loss: {:.3f}, Acc: {:.3f}, Base Lr: {:.2e}"
+                        #             .format(epoch, (n_iter + 1), iters_per_epoch, loss_meter.avg, acc_meter.avg, base_lr))
+                        logger.info(
+                            "Epoch[{}] Iter[{}/{}] |"
+                            "Loss: {:.3f} (id_tri_s+id_tri_t:{:.3f} dom:{:.3f}) |"
+                            "Acc: {:.3f} |"
+                            "DomAcc: {:.3f} λ_d:{:.3f} β:{:.3f}  BaseLr:{:.2e}".format(
+                                epoch, (n_iter + 1), iters_per_epoch,
+                                loss_meter.avg, (loss_id_tri_s + loss_id_tri_t).item(), loss_dom.item(),
+                                acc_meter.avg,
+                                dom_acc.item(), lambda_d, 0.5, base_lr
+                            )
+                        )
             else:
                 if (n_iter + 1) % log_period == 0:
                     base_lr = scheduler._get_lr(epoch)[0] if cfg.SOLVER.WARMUP_METHOD == 'cosine' else scheduler.get_lr()[0]
-                    logger.info("Epoch[{}] Iter[{}/{}] Loss: {:.3f}, Acc: {:.3f}, Base Lr: {:.2e}"
-                                .format(epoch, (n_iter + 1), iters_per_epoch, loss_meter.avg, acc_meter.avg, base_lr))
+                    # logger.info("Epoch[{}] Iter[{}/{}] Loss: {:.3f}, Acc: {:.3f}, Base Lr: {:.2e}"
+                    #             .format(epoch, (n_iter + 1), iters_per_epoch, loss_meter.avg, acc_meter.avg, base_lr))
+                    logger.info(
+                            "Epoch[{}] Iter[{}/{}] |"
+                            "Loss: {:.3f} (id_tri_s+id_tri_t:{:.3f} dom:{:.3f}) |"
+                            "Acc: {:.3f} |"
+                            "DomAcc: {:.3f} λ_d:{:.3f} β:{:.3f}  BaseLr:{:.2e}".format(
+                                epoch, (n_iter + 1), iters_per_epoch,
+                                loss_meter.avg, (loss_id_tri_s + loss_id_tri_t).item(), loss_dom.item(),
+                                acc_meter.avg,
+                                dom_acc.item(), lambda_d, 0.5, base_lr
+                            )
+                        )
 
         end_time = time.time()
         time_per_batch = (end_time - start_time) / (n_iter + 1)
@@ -185,8 +215,10 @@ def do_train(cfg,
         if epoch % checkpoint_period == 0:
             if cfg.MODEL.DIST_TRAIN:
                 if dist.get_rank() == 0:
-                    torch.save(model.state_dict(),
-                               os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_{}.pth'.format(epoch)))
+                    # torch.save(model.state_dict(),
+                    #            os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_{}.pth'.format(epoch)))
+                    state = model.module.state_dict() if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model.state_dict()
+                    torch.save(state, os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_{}.pth'.format(epoch)))
             else:
                 torch.save(model.state_dict(),
                            os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_{}.pth'.format(epoch)))

@@ -63,8 +63,19 @@ def make_dataloader(cfg):
     source_dataset = __factory[cfg.DATASETS.SOURCE_NAMES](root=cfg.DATASETS.ROOT_DIR)
     target_dataset = __factory[cfg.DATASETS.TARGET_NAMES](root=cfg.DATASETS.ROOT_DIR)
 
+    pid_offset = source_dataset.num_train_pids
+    camid_offset = source_dataset.num_train_cams
+
+    target_train_offset = []
+    for item in target_dataset.train:
+        img_path, pid, camid, viewid = item
+        target_train_offset.append((img_path, pid + pid_offset, camid + camid_offset, viewid))
+    
     source_train_set = ImageDataset(source_dataset.train, train_transforms)
-    target_train_set = ImageDataset(target_dataset.train, train_transforms)
+    target_train_set = ImageDataset(target_train_offset, train_transforms)
+
+    # source_train_set = ImageDataset(source_dataset.train, train_transforms)
+    # target_train_set = ImageDataset(target_dataset.train, train_transforms)
 
     # train_set = ImageDataset(dataset.train, train_transforms)
     # train_set_normal = ImageDataset(dataset.train, val_transforms)
@@ -72,8 +83,8 @@ def make_dataloader(cfg):
     # cam_num = dataset.num_train_cams
     # view_num = dataset.num_train_vids
 
-    num_classes = source_dataset.num_train_pids
-    cam_num = source_dataset.num_train_cams
+    num_classes = source_dataset.num_train_pids + target_dataset.num_train_pids
+    cam_num = source_dataset.num_train_cams + target_dataset.num_train_cams
     view_num = source_dataset.num_train_vids
 
     if cfg.DATALOADER.SAMPLER in ['softmax_triplet', 'img_triplet']:
@@ -103,11 +114,14 @@ def make_dataloader(cfg):
     print('using img_triplet sampler for TARGET')
     target_loader = DataLoader(
         target_train_set, batch_size=cfg.SOLVER.IMS_PER_BATCH // 2,
-        shuffle=True, num_workers=num_workers,
+        # shuffle=True 대신 sampler를 사용합니다.
+        sampler=RandomIdentitySampler(target_dataset.train, cfg.SOLVER.IMS_PER_BATCH // 2, cfg.DATALOADER.NUM_INSTANCE),
+        num_workers=num_workers,
         collate_fn=train_collate_fn, drop_last=True
     )
 
-    val_set = ImageDataset(source_dataset.query + source_dataset.gallery, val_transforms)
+    # val_set = ImageDataset(source_dataset.query + source_dataset.gallery, val_transforms)
+    val_set = ImageDataset(target_dataset.query + target_dataset.gallery, val_transforms)
     val_loader = DataLoader(
         val_set, batch_size=cfg.TEST.IMS_PER_BATCH, shuffle=False, num_workers=num_workers,
         collate_fn=val_collate_fn

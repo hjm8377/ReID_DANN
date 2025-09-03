@@ -32,7 +32,7 @@ def weights_init_xavier(m):
     classname = m.__class__.__name__
     if classname.find('Linear') != -1:
         nn.init.xavier_uniform_(m.weight)
-        if m.bias:
+        if m.bias is not None:
             nn.init.constant_(m.bias, 0.0)
     elif classname.find('Conv') != -1:
         nn.init.xavier_uniform_(m.weight)
@@ -265,16 +265,24 @@ def grl(x, lambd=1.0):
 class DomainDiscriminator(nn.Module):
     def __init__(self, in_feature=2048, hidden_size=512):
         super(DomainDiscriminator, self).__init__()
+        # self.layer = nn.Sequential(
+        #     nn.Linear(in_feature, hidden_size),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_size, hidden_size),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_size, hidden_size),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_size, 2)
+        # )
+        act = nn.LeakyReLU(0.1, inplace=True)   
         self.layer = nn.Sequential(
-            nn.Linear(in_feature, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
+            nn.Linear(in_feature, hidden_size), act,
+            nn.Linear(hidden_size, hidden_size), act,
+            nn.Linear(hidden_size, hidden_size), act,
             nn.Linear(hidden_size, 2)
         )
         self.layer.apply(weights_init_xavier)
+
 
     def forward(self, x):
         out = self.layer(x)
@@ -297,14 +305,22 @@ class BuildModel(nn.Module):
         self.domain_discriminator = DomainDiscriminator(in_feature=self.feature_extractor.in_planes, hidden_size=512)
         self.lambda_d = 0.0
 
+        self.dom_feat_after_bn = False
+
     def set_lambda_d(self, val: float):
         self.lambda_d = float(val)
 
     def forward(self, x, label=None, cam_label= None, view_label=None, domain_only=False):
         if self.training:
-            cls_score, features = self.feature_extractor(x, label=label, cam_label=cam_label, view_label=view_label, skip_classifier=domain_only)
-            domain_logit = self.domain_discriminator(grl(features, self.lambda_d))
-            return cls_score, features, domain_logit
+            cls_score, global_feat= self.feature_extractor(x, label=label, cam_label=cam_label, view_label=view_label, skip_classifier=domain_only)
+            # domain_logit = self.domain_discriminator(grl(features, self.lambda_d))
+
+            dom_inp = global_feat
+            if self.dom_feat_after_bn:
+                dom_inp = self.feature_extractor.bottleneck(global_feat)
+            domain_logit = self.domain_discriminator(grl(dom_inp, self.lambda_d))
+
+            return cls_score, global_feat, domain_logit
         else:
             features = self.feature_extractor(x, label=label, cam_label=cam_label, view_label=view_label)
         return features
